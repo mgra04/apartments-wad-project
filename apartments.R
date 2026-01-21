@@ -252,6 +252,10 @@ shapiro.test(probka_price_per_m)
 #całkowitej i ceny za m^2 to fragmenty wykresu wydają się mieć rozkład normalny
 
 #===============================================
+#Przekształcenia danych, mogą się przydać do dalszej analizy
+#===============================================
+
+#===============================================
 #Propozycje modeli docelowych
 #===============================================
 
