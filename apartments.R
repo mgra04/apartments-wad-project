@@ -266,6 +266,22 @@ baza_filtered <- baza %>%
   filter(price_per_m < 21500 | price_per_m > 22000)
 
 #===============================================
+#Przekształcenia danych, mogą się przydać do dalszej analizy
+#===============================================
+baza <- baza %>%
+  mutate (price_per_m = total_price / area) %>% 
+  mutate(log_price = log(total_price)) %>% 
+  mutate(log_price_m = log(price_per_m))
+
+baza_filtered <- baza %>% 
+  filter(price_per_m < 25000) %>% 
+  filter(log_price < 14.75 & log_price > 12.5 ) %>% 
+  filter(log_price >= 12.75) %>% 
+  filter(log_price_m >=9.2) %>% 
+  filter(log_price < 14.35) %>% 
+  filter(total_price <= 1500000) %>% 
+  filter(price_per_m < 21500 | price_per_m > 22000)
+#===============================================
 #Propozycje modeli docelowych
 #===============================================
 
