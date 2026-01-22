@@ -251,6 +251,20 @@ shapiro.test(probka_price_per_m)
 #nas uratuje. Można popróbować. Teoretycznie jak się patrzy na histogramy ceny
 #całkowitej i ceny za m^2 to fragmenty wykresu wydają się mieć rozkład normalny
 
+baza <- baza %>%
+  mutate (price_per_m = total_price / area) %>% 
+  mutate(log_price = log(total_price)) %>% 
+  mutate(log_price_m = log(price_per_m))
+
+baza_filtered <- baza %>% 
+  filter(price_per_m < 25000) %>% 
+  filter(log_price < 14.75 & log_price > 12.5 ) %>% 
+  filter(log_price >= 12.75) %>% 
+  filter(log_price_m >=9.2) %>% 
+  filter(log_price < 14.35) %>% 
+  filter(total_price <= 1500000) %>% 
+  filter(price_per_m < 21500 | price_per_m > 22000)
+
 #===============================================
 #Propozycje modeli docelowych
 #===============================================
@@ -294,7 +308,7 @@ cor.test(baza_clean$total_price, baza_clean$area, method = "spearman", exact = F
 #Pierwszy przykład oczywisty, ale no... Wyraźna korelacja dodatnia =>
 # powierzchnia jest głównym czynnikiem całkowitą cene
 
-#2. Korelacja ceny za m^2 i roku budowy
+#3. Korelacja ceny za m^2 i roku budowy
 cor.test(baza_clean$price_per_m, baza_clean$build_year, method = "spearman", exact = FALSE)
 #rho 0.009556547 p-value = 0.3856
 #Niska korelacja, wysoka wartośc p => wynik nieistotny statystycznie.
@@ -302,8 +316,145 @@ cor.test(baza_clean$price_per_m, baza_clean$build_year, method = "spearman", exa
 #opiera się na nadawaniu "rang" mógł zgłupieć... Jest obawa, że to źle dobrana
 #metoda do "zadania".
 
-#3.Zależność ceny za m^2 od stanu wykończenia
+#4.Zależność ceny za m^2 od stanu wykończenia
 kruskal.test(price_per_m ~ finishing_state, data = baza_clean)
 #chi-squared = 312.2, p-value < 2.2e-16
 #p < 0.05 => Ceny za m^2 w zależności od stanu wykończenia się różnią
 
+#===============================================
+#Przygotowanie pod regresje liniową
+#===============================================
+baza_clean <- baza_filtered %>%
+  filter(!is.na(build_year)) %>%
+  filter(build_year > 1550 & build_year <= 2026) %>%
+  filter(rooms != 0) %>%
+  filter(!is.na(finishing_state)) %>%
+  select(-id, -source, -city, -avaiable_from, -created_at) %>%
+  mutate(
+    district = as.factor(district),
+    finishing_state = as.factor(finishing_state),
+    market_type = as.factor(market_type),
+    advertiser_type = as.factor(advertiser_type),
+    has_elevator = as.numeric(has_elevator)
+  )
+
+summary(baza_clean$district)
+hist(baza_clean$log_price)
+
+ggplot(baza_clean, aes(x = area, y = total_price)) +
+  geom_point(alpha = 0.2) +
+  geom_smooth(method = "lm", color = "red") +
+  labs(
+    title = "Wpływ powierzchni na cenę całkowitą",
+    x = "Powierzchnia",
+    y = "Cena",
+  ) +
+  theme_minimal()
+
+ggplot(baza_clean, aes(x = area, y = log_price)) +
+  geom_point(alpha = 0.2) +
+  geom_smooth(method = "lm", color = "red") +
+  labs(
+    title = "Wpływ powierzchni na cenę całkowitą (log)",
+    x = "Powierzchnia",
+    y = "Cena",
+    ) +
+  theme_minimal()
+
+plot(log_price~area, data=baza_clean)
+plot(log_price~district, data=baza_clean)
+
+model_tp_area <- lm(total_price ~ area, data = baza_clean)
+model_tp_area_base <- lm(total_price ~ area, data = baza)
+summary(model_tp_area)
+summary(model_tp_area_base)
+#zwiększenie area o 1 powoduje wzrost ceny o 11930.5
+#jest bardzo istotna statystycznie
+#wyjania 65.86% wariancji
+#p-value: < 2.2e-16
+
+par(mfrow=c(2,2))
+par(mar=c(3,3,3,3))
+plot(model_tp_area) # to interpretuję
+plot(model_tp_area_base)
+# WNIOSKI
+# 1. Dla wyższych cen jednorodność wariancji się rozjeżdża - heteroskedastyczność
+# 2. reszty modelu nie mają rozkładu normalnego
+# 3. Scale-Location - idzie w góre. Potwierdza problem z pierwszego wykresu
+# dla wyższych cen większy rozrzut błędów
+
+model_tp_2 <- lm(total_price ~ area + build_year, data = baza_clean)
+summary(model_tp_2)
+#zwiększenie build_year o 1 powoduje wzrost ceny o 228.38
+#0.000154 <=> istotne statystycznie
+#mały wzrost w wyjaśnionej wariancji
+
+model_tp_3 <- lm(total_price ~ area + build_year + district + finishing_state, data = baza_clean)
+summary(model_tp_3)
+plot(model_tp_3)
+
+model_log <- lm(log_price ~ area + build_year + district + finishing_state, data = baza_clean)
+summary(model_log)
+plot(model_log)
+
+model_log_2 <- lm(log_price ~ area*district + build_year + latitude + longitude + finishing_state, data = baza_clean)
+summary(model_log_2)
+library(car)
+vif(model_log_2, type = "predictor")
+plot(model_log_2)
+
+
+#Czyszczenie najbadziej niedoszacowanych ofert dla model_log_2
+
+baza_clean <- baza_clean %>%
+  mutate(residual = resid(model_log_2))
+
+baza_clean_filtered <- baza_clean %>%
+  arrange(residual) %>%
+  slice(-(1:100)) %>%
+  select(-residual)
+
+model_log_2 <- lm(log_price ~ area*district + build_year + latitude + longitude + finishing_state, data = baza_clean_filtered)
+summary(model_log_2)
+plot(model_log_2)
+
+#==================================
+#Analiza skupień - metoda PAM
+#==================================
+library(cluster)
+library(factoextra)
+
+#1. Dane do tworzenia klastrów:
+wybrane <- select(baza_clean_filtered,c("log_price", "area", "build_year"))
+#2 Standaryzacja
+wybrane_stand <- scale(wybrane)
+
+#3.Sprawdźmy dla 4 klastów
+wynik <- pam(wybrane_stand,4)
+fviz_cluster(wynik,data = wybrane_stand)
+
+#4. Ile klastrów wybrać
+fviz_nbclust(wybrane_stand, pam, method = "wss")
+gap <- clusGap(wybrane_stand, pam, K.max = 8, B=500)
+fviz_gap_stat(gap)
+
+#5. 6 klastrów
+wynik2 <- pam(wybrane_stand,6)
+fviz_cluster(wynik2,data = wybrane_stand)
+
+#7. Jak interpretować wymiary?
+res.pca <- prcomp(wybrane_stand)
+fviz_pca_var(res.pca, col.var = "black")
+
+#Dim1 (oś pozioma) - log_price + area
+#Lewo - mieszkania większe i droższe
+#Prawo - mieszkania mniejsze i tańsze
+#Dim2 (oś pionowa) - build_year
+#Góra - wyższy rok budowy
+#Dół - niższy rok budowy
+
+#7. Analiza klastrów:
+#Klastry 1, 4, 2 - nowsze mieszkania których różni powierzchnia i cena
+#Klaster 6 - Stare budownictwo. Zawiera stare mieszkania bez podziału na powierzchnię i cenę
+#Klaster 3 - Małe i mikro mieszkania. Zarówno starsze jak i nowsze. 
+#Klaster 5 - Mieszkania premium. Duże, drogie i w znacznej większości nowsze
