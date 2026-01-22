@@ -225,8 +225,8 @@ baza %>%
   scale_y_continuous(labels = scales::comma) +
   labs(
     title = "Zależność powierzchni od ceny",
-    x = "Cena",
-    y = "Powierzchnia",
+    x = "Powierzchnia",
+    y = "Cena",
   ) +
   theme_minimal()
 #piękna chmurka. Im większa powierzchnia tym cena jest bardziej zróżnicowana.
