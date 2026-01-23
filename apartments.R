@@ -236,7 +236,8 @@ baza %>%
 #dalej łudzę, że jest
 #Problem: można przekazać makymalnie 5000 wartości
 probka_total_price <- sample(baza$total_price, 5000)
-shapiro.test(probka_total_price)
+probka_log_price <- sample(baza_filtered$log_price, 5000)
+shapiro.test(probka_log_price)
 #p-value < 2.2e-16... Oj jak boli. p wyraźnie mniejsze od 0.05 <=> brak rozkładu
 #normalnego. w=0.52
 
@@ -430,7 +431,7 @@ baza_clean_filtered <- baza_clean %>%
   slice(-(1:100)) %>%
   select(-residual)
 
-model_log_2 <- lm(log_price ~ area*district + build_year + latitude + longitude + finishing_state, data = baza_clean_filtered)
+model_log_2 <- lm(log_price ~ area*district + build_year + finishing_state, data = baza_clean_filtered)
 summary(model_log_2)
 plot(model_log_2)
 
@@ -474,3 +475,6 @@ fviz_pca_var(res.pca, col.var = "black")
 #Klaster 6 - Stare budownictwo. Zawiera stare mieszkania bez podziału na powierzchnię i cenę
 #Klaster 3 - Małe i mikro mieszkania. Zarówno starsze jak i nowsze. 
 #Klaster 5 - Mieszkania premium. Duże, drogie i w znacznej większości nowsze
+
+#Czy dane sensownie podzielone
+#
