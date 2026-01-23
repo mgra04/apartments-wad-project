@@ -7,11 +7,11 @@ install.packages("sf")
 install.packages("leaflet")
 install.packages("viridis")
 install.packages("dummy")
+install.packages("fastDummies")
 install.packages("openxlsx")
 install.packages("e1071")
 install.packages("ggplot2")
 install.packages("ggcorrplot")
-install.packages("dummy")
 install.packages("car")
 install.packages("moments")
 #===============================================
@@ -31,6 +31,7 @@ library(ggcorrplot)
 library(dummy)
 library(car)
 library(moments)
+library(fastDummies)
 #===============================================
 #Baza
 #===============================================
@@ -1215,10 +1216,6 @@ tabela_final$Zmienna[tabela_final$Zmienna == "Epoka: "] <- "Epoka: Kamienica"
 #grupowanie po zmiennej
 print(tabela_final, row.names = FALSE)
 
-#======================================
-
-#======================================
-
 coefs <- coef(model3)[-1]
 #Pobranie zmiennych bez interceptu
 
@@ -1268,39 +1265,193 @@ tabela_final$Zmienna[tabela_final$Zmienna == "Epoka: "] <- "Epoka: Kamienica"
 #grupowanie po zmiennej
 print(tabela_final, row.names = FALSE)
 
-#===============================================
-#Analiza skupień - metoda PAM - Mikołaj Grabowski
-#===============================================
-#1. Dane do tworzenia klastrów:
-wybrane <- select(baza_filtered,c("log_price", "area", "build_year"))
+#===================================
+#Testowanie modeli - Mikołaj Grabowski
+#===================================
+#1. Wczytanie bazy testowej
+baza_test <- read.xlsx("C:/WAD/Dane/apartments-test.xlsx")
 
-#2 Standaryzacja
-wybrane_stand <- scale(wybrane)
+#2. Wstępne przygotowanie - wspólne dla wszystkich modeli
+# Zamiana typów i obsługa braków danych
+baza_test <- baza_test %>%
+  mutate(across(c(latitude, longitude, total_price, area, rooms, floor, total_floors, build_year), as.numeric)) %>%
+  mutate(log_price = log(total_price),
+         has_elevator = as.numeric(has_elevator),
+         price_per_m = total_price / area,
+         log_price_m = log(total_price / area))
 
-#3. Ile klastrów wybrać?
-fviz_nbclust(wybrane_stand, pam, method = "wss")
-gap <- clusGap(wybrane_stand, pam, K.max = 8, B=500)
+baza_test <- baza_test %>% 
+  filter(!is.na(build_year),
+         !is.na(finishing_state),
+         !is.na(heating_type),
+         build_year > 1000,
+         total_price <= 1500000)
+
+#3. Przygotowanie bazy dla modelu 1
+baza_m1 <- baza_test %>%
+  mutate(across(c(district, finishing_state, market_type, advertiser_type, heating_type), as.factor))
+
+#4. Przygotowanie bazy dla modelu 2
+#dodanie logarytmu powierzchni, podziału na epoki i ręcznego dummy encodingu
+baza_m2 <- baza_test %>%
+  mutate(area_log = log(area)) %>%
+  mutate(build_year = cut(build_year, 
+                          breaks = c(-Inf, 1945, 1989, 2010, Inf), 
+                          labels = c("Kamienica", "PRL", "Transformacja", "Nowe")))
+
+#Generowanie zmiennych Dummy
+baza_m2 <- dummy_cols(
+  baza_m2,
+  select_columns = c("heating_type", "finishing_state", "district", "market_type", "advertiser_type"),
+  remove_first_dummy = TRUE,
+  remove_selected_columns = TRUE
+)
+
+# Usunięcie zbędnych kolumn numerycznych, których Janek nie użył w 2 modelu
+names(baza_m2) <- gsub(" ", "_", names(baza_m2))
+
+#Dodatkowe działania w celu zgrania bazy testowej z modelem
+#a) Nazwy kolumn których oczekuje model
+required_cols <- names(coef(model2))[-1]
+
+#b) Jakich kolumn brakuje w bazie testowej?
+missing_cols <- setdiff(required_cols, names(baza_m2))
+
+#c) Wypełnienie brakujących kolumn zerami
+if(length(missing_cols) > 0) {
+  baza_m2[missing_cols] <- 0
+}
+
+#5. Przygotowanie bazy dla modelu 3
+#Model 3 to model 2 po usunięciu konkretnych zmiennych, ale to już jest wpisane
+#w formule modelu
+baza_m3 <- baza_m2
+
+#6. Testowanie modeli
+pred1 <- predict(model1, newdata = baza_m1)
+pred2 <- predict(model2, newdata = baza_m2)
+pred3 <- predict(model3, newdata = baza_m3)
+
+print(pred1)
+
+#7. Wyniki (exp żeby wrócić z logarytmu do "normalnej" wartości)
+wyniki <- data.frame(
+  Actual = baza_test$total_price,
+  Pred_M1 = exp(pred1),
+  Pred_M2 = exp(pred2),
+  Pred_M3 = exp(pred3)
+)
+
+#8. Przygotowanie zmiennych do wykresu
+wyniki_long_1 <- wyniki %>%
+  pivot_longer(cols = starts_with("Pred"), 
+               names_to = "Model", 
+               values_to = "Prediction")
+
+wyniki_long_2 <- wyniki_long %>%
+  mutate(Reszty = Actual - Prediction)
+
+#9. Wykresy
+df_m1 <- data.frame(
+  Actual = baza_test$total_price,
+  Predicted = exp(pred1)
+)
+
+ggplot(df_m1, aes(x = Actual, y = Predicted)) +
+  geom_point(color = "#0fd149", alpha = 0.6, size = 1.5) +
+  geom_smooth(method = "lm", color = "#0f25d1", fill = "lightblue", alpha = 0.2) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "#d10f1c", size = 1) +
+  scale_x_continuous(labels = scales::label_number(suffix = " zł", big.mark = " ")) +
+  scale_y_continuous(labels = scales::label_number(suffix = " zł", big.mark = " ")) +
+  labs(
+    title = "Analiza dokładności Modelu 1",
+    subtitle = "Linia czerwona: idealna predykcja | Linia niebieska: trend predykcji",
+    x = "Cena rzeczywista",
+    y = "Cena przewidziana"
+  ) +
+  theme_minimal()
+
+df_m2 <- data.frame(
+  Actual = baza_test$total_price,
+  Predicted = exp(pred2)
+)
+
+ggplot(df_m2, aes(x = Actual, y = Predicted)) +
+  geom_point(color = "#0fd149", alpha = 0.6, size = 1.5) +
+  geom_smooth(method = "lm", color = "#0f25d1", fill = "lightblue", alpha = 0.2) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "#d10f1c", size = 1) +
+  scale_x_continuous(labels = scales::label_number(suffix = " zł", big.mark = " ")) +
+  scale_y_continuous(labels = scales::label_number(suffix = " zł", big.mark = " ")) +
+  labs(
+    title = "Analiza dokładności Modelu 2",
+    subtitle = "Linia czerwona: idealna predykcja | Linia niebieska: trend predykcji",
+    x = "Cena rzeczywista",
+    y = "Cena przewidziana"
+  ) +
+  theme_minimal()
+
+df_m3 <- data.frame(
+  Actual = baza_test$total_price,
+  Predicted = exp(pred3)
+)
+
+ggplot(df_m3, aes(x = Actual, y = Predicted)) +
+  geom_point(color = "#0fd149", alpha = 0.6, size = 1.5) +
+  geom_smooth(method = "lm", color = "#0f25d1", fill = "lightblue", alpha = 0.2) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "#d10f1c", size = 1) +
+  scale_x_continuous(labels = scales::label_number(suffix = " zł", big.mark = " ")) +
+  scale_y_continuous(labels = scales::label_number(suffix = " zł", big.mark = " ")) +
+  labs(
+    title = "Analiza dokładności Modelu 3",
+    subtitle = "Linia czerwona: idealna predykcja | Linia niebieska: trend predykcji",
+    x = "Cena rzeczywista",
+    y = "Cena przewidziana"
+  ) +
+  theme_minimal()
+#WNIOSKI
+#Model pierwszy to jakiś asior. Był przeszkolony przez dostępne zmienne poza ceną za metr
+#(i zmiennymi które nic nie wnosiły - zostały odfiltrowane)
+#i jest niemal nieomylny do pewnej kwoty (1.5mln) Warto też zaznaczyć, że sam model
+#był liczony na odfiltrowanych danych. Zastanawiający jest fakt wykresów które
+#są daleko od tego co moglibyśmy uznać za książkowe
+#Model 2 i 3 osiągna ma niemal identyczne predykcje. W przypadku tych modeli
+#wykresy były dużo lepsze jednak same predykcje są znacznie gorsze w porównaniu
+#z modelem pierwszym
+
+#===============================================
+#Analiza skupień - metoda PAM
+#===============================================
+#1. Przygotowanie bazy do analizy
+baza_cluster_analysis <- baza %>%
+  filter(
+    total_price >= 350000 & total_price <= 3000000,
+    area >= 20 & area <= 150,
+    price_per_m >= 7000 & price_per_m <= 40000,
+    build_year > 1550 & build_year <= 2026,
+    rooms != 0
+  ) %>%
+  select(log_price_m, area, rooms, build_year, latitude, longitude) %>%
+  na.omit() %>% #raczej braków nie ma, ale na wszelki
+  scale()
+
+# 2. Ile klastrów wybrać?
+fviz_nbclust(baza_cluster_analysis, pam, method = "wss")
+
+gap <- clusGap(baza_cluster_analysis, pam, K.max = 8, B = 100)
 fviz_gap_stat(gap)
 
 #4. Wersja dla 4 klastrów
-wynik_4_klastry <- pam(wybrane_stand,6)
-fviz_cluster(wynik_4_klastry,data = wybrane_stand)
+wynik_4_klastry <- pam(baza_cluster_analysis,6)
+fviz_cluster(wynik_4_klastry,data = baza_cluster_analysis)
 
 #5. Wersja dla 6 klastrów
-wynik_6_klastry <- pam(wybrane_stand,6)
-fviz_cluster(wynik_4_klastry,data = wybrane_stand)
+wynik_6_klastry <- pam(baza_cluster_analysis,6)
+fviz_cluster(wynik_4_klastry,data = baza_cluster_analysis)
 
 #6. Wersja dla 7 klastrów
-wynik_7_klastry <- pam(wybrane_stand,6)
-fviz_cluster(wynik_4_klastry,data = wybrane_stand)
+wynik_7_klastry <- pam(baza_cluster_analysis,6)
+fviz_cluster(wynik_4_klastry,data = baza_cluster_analysis)
 
 #7. Jak interpretować wymiary
-res.pca <- prcomp(wybrane_stand)
+res.pca <- prcomp(baza_cluster_analysis)
 fviz_pca_var(res.pca, col.var = "black")
-
-#Dim1 (oś pozioma) - log_price + area
-#Lewo - mieszkania większe i droższe
-#Prawo - mieszkania mniejsze i tańsze
-#Dim2 (oś pionowa) - build_year
-#Góra - wyższy rok budowy
-#Dół - niższy rok budowy
