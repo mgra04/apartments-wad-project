@@ -375,3 +375,57 @@ par(mfrow = c(2, 2))  # Dzieli ekran na 2 wiersze i 2 kolumny
 plot(model3)
 par(mfrow = c(1,1))
 #końcowy model
+reszty <- resid(model3)
+
+hist(reszty)
+#pokazanie rozkładu reszt modelu
+
+coefs <- coef(model3)[-1]
+#Pobranie zmiennych bez interceptu
+
+tabela_final <- data.frame(
+  Zmienna = names(coefs),
+  Beta = coefs
+) %>%
+  #utworzenie tabeli zawierającej zmienne oraz ich wpływ w procentach
+  mutate(
+    Wplyw_Procentowy = ifelse(
+      Zmienna == "area_log",
+      round(Beta * 1, 2), 
+      round((exp(Beta) - 1) * 100, 2) 
+    )
+    #logika obliczania wpływu procentowego
+    #Nie obliczamy logarytmu dla area_log
+  ) %>%
+  select(Zmienna, Wplyw_Procentowy) %>%
+  arrange(desc(abs(Wplyw_Procentowy))) # Sortowanie od najsilniejszych czynników
+#wybieramy kolumny oraz sortujemy
+
+
+referencje <- data.frame(
+  Zmienna = c(
+    "heating_type_boiler_room",
+    "finishing_state_ready_to_use",
+    "district_Bieńczyce", "build_year"
+  ),
+  Wplyw_Procentowy = 0
+)
+#utworzenie tabeli ze zmiennymi referencyjnymi
+
+tabela_final <- bind_rows(tabela_final, referencje) %>%
+  mutate(
+    Zmienna = gsub("district_", "Dzielnica: ", Zmienna),
+    Zmienna = gsub("heating_type_", "Ogrzewanie: ", Zmienna),
+    Zmienna = gsub("finishing_state_", "Standard: ", Zmienna),
+    Zmienna = gsub("market_type_", "Rynek: ", Zmienna),
+    Zmienna = gsub("advertiser_type_", "Ogłoszeniodawca: ", Zmienna),
+    Zmienna = gsub("build_year", "Epoka: ", Zmienna)
+  ) %>%
+  #utworzenie tabeli finalnej 
+  arrange(Zmienna, desc(abs(Wplyw_Procentowy)))
+
+tabela_final$Zmienna[tabela_final$Zmienna == "Epoka: "] <- "Epoka: Kamienica"
+#Zmiana nazwy "Epoka" na "Epoka: Kamienica" dla czytelności
+#grupowanie po zmiennej
+print(tabela_final, row.names = FALSE)
+#wyświetlanie tabeli
