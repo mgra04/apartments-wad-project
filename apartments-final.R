@@ -574,7 +574,7 @@ baza_filtered %>%
 #===============================================
 
 #1. Regresja liniowa
-#   a) zmienna wyjaśniana: total_price
+#   a) zmienna wyjaśniana: log_price
 
 #2. Analiza skupień
 
@@ -585,6 +585,7 @@ baza_filtered %>%
 
 #===============================================
 #Regresja liniowa
+#Za tą część odpowiadał: Jan Barchanowicz
 #===============================================
 #1. Przygotowanie bazy do regresji:
 library(tidyverse)
@@ -1123,4 +1124,5 @@ tabela_final$Zmienna[tabela_final$Zmienna == "Epoka: "] <- "Epoka: Kamienica"
 print(tabela_final, row.names = FALSE)
 #===============================================
 #Analiza skupień
+#Za tą część odpowiadał: Mikołaj Grabowski
 #===============================================
