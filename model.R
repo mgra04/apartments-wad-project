@@ -197,6 +197,19 @@ baza$market_type <- as.factor(baza$market_type)
 baza$advertiser_type <- as.factor(baza$advertiser_type)
 #przekształcenie zmiennych kategorialnych na factory
 
+model1 <- lm(formula = log_price ~ . + area * district - price_per_m - log_price_m, data = baza)
+summary(model1)
+par(mfrow = c(2, 2))  # Dzieli ekran na 2 wiersze i 2 kolumny
+plot(model1)
+par(mfrow = c(1,1))
+#pierwszy model z relacją
+#area_log - district
+#decyzja o kodowaniu hot one aby 
+#ułatwić interpretację modelu
+#Mimo niewiarygodnie wysokiego R^2
+#Jakość modelu nie jest najlepsza, prawdopodobnie z powodu zbyt dużej
+#ilości zmiennych wyjaśniających, oraz z powodu obecności zmiennych
+#kategorialnych
 install.packages("fastDummies")
 library(fastDummies)
 lapply(baza[c("heating_type", "finishing_state", "district", "market_type", "advertiser_type")],
@@ -227,16 +240,6 @@ baza <- baza %>%
 # w formie logarytmowanej
 names(baza) <- gsub(" ", "_", names(baza))
 #pozybcie się spacji w nazwach zmiennych
-
-model1 <- lm(formula = log_price ~ ., data = baza)
-summary(model1)
-#pierwszy model, ze wszystkimi zm jako 
-#predyktorami
-#wartosci współczynników są nie do końca
-
-par(mfrow = c(2, 2))  # Dzieli ekran na 2 wiersze i 2 kolumny
-plot(model1)
-par(mfrow = c(1,1))
 #wykresy diagnostyczne modelu
 reszty <- resid(model1)
 baza <- baza[abs(reszty) <= 0.4, ]
@@ -260,36 +263,9 @@ baza$area <- log(baza$area)
 baza <- rename(baza, area_log = area)
 #zmiana nazwy kolumny w celu poprawy czytelności
 
-v_model_m <- vif(model1)
-subset(v_model_m, v_model_m > 5)
-#wyświetlenie czynników o VIF >5)
-#Zmienne dzielnicowe niestety muszą zostać, mimo tak
-#silnego wpływu na model
-#natomiast usunięciu podległa zmienna heating_type_urban, 
-#gdyż niewiele wnosi ona do wytłumaczenia ceny
-ggplot(baza_model, aes(x = factor(heating_type_urban), y = log_price)) +
-       stat_summary(fun = mean, geom = "point", size = 3, color = "red") +
-       stat_summary(fun.data = mean_cl_normal, geom = "errorbar", width = 0.2) +
-       labs(
-           x = "Heating type: urban",
-           y = "Log price",
-             title = "Średnie log_price z przedziałami ufności"
-         ) +
-      theme_minimal()
 
-#jak widać tutaj na wykresie
-
-model1 <- lm(formula = log_price ~ ., data = baza)
-summary(model1)
-par(mfrow = c(2, 2))  # Dzieli ekran na 2 wiersze i 2 kolumny
-plot(model1)
-par(mfrow = c(1,1))
-
-#ponowne sprawdzenie modelu
-v_model_m <- vif(model1)
-subset(v_model_m, v_model_m > 5)
 #podejrzenie silnej korelacji market_type_secondary z year_build
-cor_matrix <- cor(baza[, c("market_type_secondary", "build_year")])
+cor_matrix <- cor(baza[ , c("market_type_secondary", "build_year")])
 corrplot::corrplot(
   cor_matrix,
   method = "color",
@@ -318,9 +294,30 @@ par(mfrow = c(2, 2))  # Dzieli ekran na 2 wiersze i 2 kolumny
 plot(model2)
 par(mfrow = c(1,1))
 
-#sprawdzenie modelu bez usuniętych danych
-#i z year_built jako factor
-#kamienica jest wartośćią referencyjną
+v_model_m <- vif(model2)
+subset(v_model_m, v_model_m > 5)
+#wyświetlenie czynników o VIF >5)
+#Zmienne dzielnicowe niestety muszą zostać, mimo tak
+#silnego wpływu na model
+#natomiast usunięciu podległa zmienna heating_type_urban, 
+#gdyż niewiele wnosi ona do wytłumaczenia ceny
+ggplot(baza, aes(x = factor(heating_type_urban), y = log_price)) +
+  stat_summary(fun = mean, geom = "point", size = 3, color = "red") +
+  stat_summary(fun.data = mean_cl_normal, geom = "errorbar", width = 0.2) +
+  labs(
+    x = "Heating type: urban",
+    y = "Log price",
+    title = "Średnie log_price z przedziałami ufności"
+  ) +
+  theme_minimal()
+
+#jak widać tutaj na wykresie
+
+
+#ponowne sprawdzenie modelu
+v_model_m <- vif(model2)
+subset(v_model_m, v_model_m > 5)
+
 
 #kolejny etap - usunięcie zmiennych nie wnoszących nic do modelu
 #tutaj będą to zmienne advertiser_type oraz market_type_secondary
@@ -375,3 +372,163 @@ par(mfrow = c(2, 2))  # Dzieli ekran na 2 wiersze i 2 kolumny
 plot(model3)
 par(mfrow = c(1,1))
 #końcowy model
+
+reszty <- resid(model3)
+
+hist(reszty)
+#pokazanie rozkładu reszt modelu
+
+coefs <- coef(model3)[-1]
+#Pobranie zmiennych bez interceptu
+
+tabela_final <- data.frame(
+  Zmienna = names(coefs),
+  Beta = coefs
+) %>%
+  #utworzenie tabeli zawierającej zmienne oraz ich wpływ w procentach
+  mutate(
+    Wplyw_Procentowy = ifelse(
+      Zmienna == "area_log",
+      round(Beta * 1, 2), 
+      round((exp(Beta) - 1) * 100, 2) 
+    )
+    #logika obliczania wpływu procentowego
+    #Nie obliczamy logarytmu dla area_log
+  ) %>%
+  select(Zmienna, Wplyw_Procentowy) %>%
+  arrange(desc(abs(Wplyw_Procentowy))) # Sortowanie od najsilniejszych czynników
+#wybieramy kolumny oraz sortujemy
+
+
+referencje <- data.frame(
+  Zmienna = c(
+    "heating_type_boiler_room",
+    "finishing_state_ready_to_use",
+    "district_Bieńczyce", "build_year"
+  ),
+  Wplyw_Procentowy = 0
+)
+#utworzenie tabeli ze zmiennymi referencyjnymi
+
+tabela_final <- bind_rows(tabela_final, referencje) %>%
+  mutate(
+    Zmienna = gsub("district_", "Dzielnica: ", Zmienna),
+    Zmienna = gsub("heating_type_", "Ogrzewanie: ", Zmienna),
+    Zmienna = gsub("finishing_state_", "Standard: ", Zmienna),
+    Zmienna = gsub("market_type_", "Rynek: ", Zmienna),
+    Zmienna = gsub("advertiser_type_", "Ogłoszeniodawca: ", Zmienna),
+    Zmienna = gsub("build_year", "Epoka: ", Zmienna)
+  ) %>%
+  #utworzenie tabeli finalnej 
+  arrange(Zmienna, desc(abs(Wplyw_Procentowy)))
+
+tabela_final$Zmienna[tabela_final$Zmienna == "Epoka: "] <- "Epoka: Kamienica"
+#Zmiana nazwy "Epoka" na "Epoka: Kamienica" dla czytelności
+#grupowanie po zmiennej
+print(tabela_final, row.names = FALSE)
+#wyświetlanie tabeli
+
+#===================================
+#To samo dla pozostałych dwóch modeli
+#===================================
+coefs <- coef(model2)[-1]
+#Pobranie zmiennych bez interceptu
+
+tabela_final <- data.frame(
+  Zmienna = names(coefs),
+  Beta = coefs
+) %>%
+  #utworzenie tabeli zawierającej zmienne oraz ich wpływ w procentach
+  mutate(
+    Wplyw_Procentowy = ifelse(
+      Zmienna == "area_log",
+      round(Beta * 1, 2), 
+      round((exp(Beta) - 1) * 100, 2) 
+    )
+    #logika obliczania wpływu procentowego
+    #Nie obliczamy logarytmu dla area_log
+  ) %>%
+  select(Zmienna, Wplyw_Procentowy) %>%
+  arrange(desc(abs(Wplyw_Procentowy))) # Sortowanie od najsilniejszych czynników
+#wybieramy kolumny oraz sortujemy
+
+
+referencje <- data.frame(
+  Zmienna = c(
+    "heating_type_boiler_room",
+    "finishing_state_ready_to_use",
+    "district_Bieńczyce", "build_year", "Rynek, Ogłoszeniodawca:"
+  ),
+  Wplyw_Procentowy = 0
+)
+#utworzenie tabeli ze zmiennymi referencyjnymi
+
+tabela_final <- bind_rows(tabela_final, referencje) %>%
+  mutate(
+    Zmienna = gsub("district_", "Dzielnica: ", Zmienna),
+    Zmienna = gsub("heating_type_", "Ogrzewanie: ", Zmienna),
+    Zmienna = gsub("finishing_state_", "Standard: ", Zmienna),
+    Zmienna = gsub("market_type_", "Rynek: ", Zmienna),
+    Zmienna = gsub("advertiser_type_", "Ogłoszeniodawca: ", Zmienna),
+    Zmienna = gsub("build_year", "Epoka: ", Zmienna)
+  ) %>%
+  #utworzenie tabeli finalnej 
+  arrange(Zmienna)
+
+tabela_final$Zmienna[tabela_final$Zmienna == "Epoka: "] <- "Epoka: Kamienica"
+#Zmiana nazwy "Epoka" na "Epoka: Kamienica" dla czytelności
+#grupowanie po zmiennej
+print(tabela_final, row.names = FALSE)
+
+#======================================
+
+#======================================
+
+coefs <- coef(model3)[-1]
+#Pobranie zmiennych bez interceptu
+
+tabela_final <- data.frame(
+  Zmienna = names(coefs),
+  Beta = coefs
+) %>%
+  #utworzenie tabeli zawierającej zmienne oraz ich wpływ w procentach
+  mutate(
+    Wplyw_Procentowy = ifelse(
+      Zmienna == "area_log",
+      round(Beta * 1, 2), 
+      round((exp(Beta) - 1) * 100, 2) 
+    )
+    #logika obliczania wpływu procentowego
+    #Nie obliczamy logarytmu dla area_log
+  ) %>%
+  select(Zmienna, Wplyw_Procentowy) %>%
+  arrange(desc(abs(Wplyw_Procentowy))) # Sortowanie od najsilniejszych czynników
+#wybieramy kolumny oraz sortujemy
+
+
+referencje <- data.frame(
+  Zmienna = c(
+    "heating_type_boiler_room",
+    "finishing_state_ready_to_use",
+    "district_Bieńczyce", "build_year"
+  ),
+  Wplyw_Procentowy = 0
+)
+#utworzenie tabeli ze zmiennymi referencyjnymi
+
+tabela_final <- bind_rows(tabela_final, referencje) %>%
+  mutate(
+    Zmienna = gsub("district_", "Dzielnica: ", Zmienna),
+    Zmienna = gsub("heating_type_", "Ogrzewanie: ", Zmienna),
+    Zmienna = gsub("finishing_state_", "Standard: ", Zmienna),
+    Zmienna = gsub("market_type_", "Rynek: ", Zmienna),
+    Zmienna = gsub("advertiser_type_", "Ogłoszeniodawca: ", Zmienna),
+    Zmienna = gsub("build_year", "Epoka: ", Zmienna)
+  ) %>%
+  #utworzenie tabeli finalnej 
+  arrange(Zmienna, desc(abs(Wplyw_Procentowy)))
+
+tabela_final$Zmienna[tabela_final$Zmienna == "Epoka: "] <- "Epoka: Kamienica"
+#Zmiana nazwy "Epoka" na "Epoka: Kamienica" dla czytelności
+#grupowanie po zmiennej
+print(tabela_final, row.names = FALSE)
