@@ -2,6 +2,14 @@
 #Biblioteki (do pobrania jeśli nie masz)
 #===============================================
 install.packages("nortest")
+install.packages("dummy")
+install.packages("openxlsx")
+install.packages("e1071")
+install.packages("ggplot2")
+install.packages("ggcorrplot")
+install.packages("dummy")
+install.packages("car")
+install.packages("moments")
 #===============================================
 #Biblioteki
 #===============================================
@@ -9,6 +17,11 @@ library(tidyverse)
 library(openxlsx)
 library(nortest)
 library(e1071)
+library(ggplot2)
+library(ggcorrplot)
+library(dummy)
+library(car)
+library(moments)
 #===============================================
 #Baza
 #===============================================
