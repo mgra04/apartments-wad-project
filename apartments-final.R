@@ -536,6 +536,19 @@ baza_filtered %>%
 #===============================================
 #Regresja liniowa
 #===============================================
+#1. Przygotowanie bazy do regresji:
+baza_lr <- baza %>%
+  filter(
+    total_price >= 500000 & total_price <= 1380000,
+    area >= 25 & area <= 110,
+    price_per_m >= 7000 & price_per_m <= 28000,
+    build_year > 1550 & build_year <= 2026,
+    rooms != 0,
+    total_floors >= floor,
+    !is.na(finishing_state),
+    !is.na(advertiser_type),
+    !is.na(market_type),
+  )
 
 
 #===============================================
