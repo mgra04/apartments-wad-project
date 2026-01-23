@@ -532,7 +532,7 @@ baza_filtered %>%
   ) +
   theme_minimal()
 
-# Ad. 5 Wykres rozrzutu ceny za m^2 od roku budowy z wygładzaniem LOESS
+# Ad. 5 Wykres rozrzutu ceny za m^2 od roku budowy z wygładzaniem LOESS (Mikołaj Dyjakowski)
 baza_filtered %>%
   filter(build_year >= 1865) %>%   # <--- Ograniczenie zakresu czasowego
   ggplot(aes(x = build_year, y = price_per_m)) +
@@ -549,16 +549,15 @@ baza_filtered %>%
 
 
 #===============================================
-#Ad.6 Mapa cen (Heatmapa punktowa)
+#Ad.6 Mapa cen (Heatmapa punktowa) (Mikołaj Dyjakowski)
 #===============================================
 
 # Wykres geograficzny: Kolor punktu zależy od ceny za m^2
 baza_filtered %>%
   ggplot(aes(x = longitude, y = latitude, color = price_per_m)) +
-  geom_point(alpha = 0.6, size = 1) +  # alpha zwiększa czytelność przy nakładaniu się punktów
-  # Skala "magma" lub "plasma" świetnie imituje termowizję (ciemny = tanio, jasny = drogo)
+  geom_point(alpha = 0.6, size = 1) +  
   scale_color_viridis_c(option = "magma", direction = -1, labels = scales::comma) + 
-  coord_quickmap() +  # KLUCZOWE: Zachowuje poprawne proporcje geograficzne (Kraków nie będzie rozciągnięty)
+  coord_quickmap() +  
   labs(
     title = "Geograficzny rozkład cen mieszkań w Krakowie",
     subtitle = "Im jaśniejszy kolor, tym wyższa cena za m^2",
@@ -566,7 +565,7 @@ baza_filtered %>%
     y = "Szerokość geograficzna",
     color = "Cena/m^2"
   ) +
-  theme_dark() # Ciemny motyw lepiej kontrastuje z "heatmapą"
+  theme_dark() 
 
 
 #===============================================
