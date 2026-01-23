@@ -5,8 +5,8 @@ baza <- read.xlsx("C:/WAD/Dane/apartments.xlsx")
 #===============================================
 #Opis bazy
 #===============================================
-#Baza zawiera dane wszystkich ofert mieszkań na sprzedaż z otodom.pl z dnia 
-#04.01.2026. Zebrane dane i ich opis:
+#Baza zawiera dane wszystkich ofert mieszkań na sprzedaż w Krakowie z otodom.pl 
+#z dnia 04.01.2026. Zebrane dane i ich opis:
 #id - unikalny identyfikator oferty
 #source - link do oferty
 #city - stała wartość "Cracow"
@@ -35,11 +35,11 @@ baza <- read.xlsx("C:/WAD/Dane/apartments.xlsx")
 #===============================================
 
 #1. Sprawdzenie wszystkich typów danych w bazie
-typ_danych <- data.frame(
+typy_danych <- data.frame(
   kolumna = names(baza),
   typ = sapply(baza, class)
 )
-print(typ_danych)
+print(typy_danych)
 # Ad.1
 # wszystkie dane poza "has_elevator" ma typ character co uniemożliwia
 # sporą część dalszych analiz
@@ -221,7 +221,20 @@ baza %>%
   filter(total_price <= 3000000, area <= 200) %>%
   ggplot (aes(x=area, y=total_price)) +
   geom_point(alpha = 0.4) +
-  geom_smooth(method = "lm") +
+  geom_smooth(method = "loess") +
+  scale_y_continuous(labels = scales::comma) +
+  labs(
+    title = "Zależność powierzchni (do 200m^2) od ceny (3mln)",
+    x = "Powierzchnia",
+    y = "Cena",
+  ) +
+  theme_minimal()
+
+baza %>%
+  filter(total_price <= 3000000, area <= 200) %>%
+  ggplot (aes(x=area, y=total_price)) +
+  geom_point(alpha = 0.4) +
+  geom_smooth(method = "loess") +
   scale_y_continuous(labels = scales::comma) +
   labs(
     title = "Zależność powierzchni od ceny",
@@ -230,6 +243,7 @@ baza %>%
   ) +
   theme_minimal()
 #piękna chmurka. Im większa powierzchnia tym cena jest bardziej zróżnicowana.
+#https://www.otodom.pl/pl/oferta/1-pokojowe-mieszkanie-35m2-balkon-bez-prowizji-ID4uaTB
 
 #7. Sprawdzenie normalności rozkładu
 #Na historgramach już można było dostrzec, że nie jest on normalny, ale ja się
@@ -476,5 +490,86 @@ fviz_pca_var(res.pca, col.var = "black")
 #Klaster 3 - Małe i mikro mieszkania. Zarówno starsze jak i nowsze. 
 #Klaster 5 - Mieszkania premium. Duże, drogie i w znacznej większości nowsze
 
-#Czy dane sensownie podzielone
-#
+#===============================================
+#Analiza skupień - metoda PAM
+#===============================================
+#1. Dane do tworzenia klastrów:
+wybrane <- select(baza_filtered,c("log_price", "area", "build_year"))
+
+#2 Standaryzacja
+wybrane_stand <- scale(wybrane)
+
+#3. Ile klastrów wybrać?
+fviz_nbclust(wybrane_stand, pam, method = "wss")
+gap <- clusGap(wybrane_stand, pam, K.max = 8, B=500)
+fviz_gap_stat(gap)
+
+#4. Wersja dla 4 klastrów
+wynik_4_klastry <- pam(wybrane_stand,6)
+fviz_cluster(wynik_4_klastry,data = wybrane_stand)
+
+#5. Wersja dla 6 klastrów
+wynik_6_klastry <- pam(wybrane_stand,6)
+fviz_cluster(wynik_4_klastry,data = wybrane_stand)
+
+#6. Wersja dla 7 klastrów
+wynik_7_klastry <- pam(wybrane_stand,6)
+fviz_cluster(wynik_4_klastry,data = wybrane_stand)
+
+#7. Jak interpretować wymiary
+res.pca <- prcomp(wybrane_stand)
+fviz_pca_var(res.pca, col.var = "black")
+
+#Dim1 (oś pozioma) - log_price + area
+#Lewo - mieszkania większe i droższe
+#Prawo - mieszkania mniejsze i tańsze
+#Dim2 (oś pionowa) - build_year
+#Góra - wyższy rok budowy
+#Dół - niższy rok budowy
+
+#===============================================
+#Heatmapa
+#===============================================
+mieszkania_sf <- st_as_sf(baza, coords = c("longitude", "latitude"), crs = 4326)
+
+baza_heatmap_price_per_m <- baza %>%
+  filter(price_per_m >= 7000 & price_per_m <= 30000)
+
+leaflet(baza_heatmap_price_per_m) %>%
+  addTiles() %>%
+  addCircleMarkers(
+    lng = ~longitude, 
+    lat = ~latitude,
+    radius = 5,
+    color = ~colorNumeric("YlOrRd", price_per_m)(price_per_m),
+    fillOpacity = 0.8,
+    stroke = FALSE,
+    popup = ~paste0("Dzielnica: ", district, "<br>",
+                    "Cena/m2: ", round(price_per_m, 2), " zł<br>",
+                    "Powierzchnia: ", area, " m2")
+  ) %>%
+  addLegend(pal = colorNumeric("YlOrRd", baza_heatmap_price_per_m$price_per_m), 
+            values = ~price_per_m, 
+            title = "Cena za m^2", 
+            position = "bottomright")
+
+baza_heatmap_total_price <- baza %>%
+  filter(total_price >= 500000 & total_price <= 2000000)
+
+leaflet(baza_heatmap_total_price) %>%
+  addTiles() %>%
+  addCircleMarkers(
+    lng = ~longitude, 
+    lat = ~latitude,
+    radius = 5,
+    color = ~colorNumeric("YlOrRd", total_price)(total_price),
+    fillOpacity = 0.8,
+    stroke = FALSE,
+    popup = ~paste0("Dzielnica: ", district, "<br>",
+                    "Cena: ", round(total_price, 2), " zł<br>",
+                    "Powierzchnia: ", area, " m2")
+  ) %>%
+  addLegend(pal = colorNumeric("YlOrRd", baza_heatmap_total_price$total_price), 
+            values = ~total_price, 
+            title = "Cena", 
+            position = "bottomright")

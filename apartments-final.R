@@ -2,6 +2,18 @@
 #Biblioteki (do pobrania jeśli nie masz)
 #===============================================
 install.packages("nortest")
+install.packages("ggspatial")
+install.packages("sf")
+install.packages("leaflet")
+install.packages("viridis")
+install.packages("dummy")
+install.packages("openxlsx")
+install.packages("e1071")
+install.packages("ggplot2")
+install.packages("ggcorrplot")
+install.packages("dummy")
+install.packages("car")
+install.packages("moments")
 #===============================================
 #Biblioteki
 #===============================================
@@ -9,6 +21,16 @@ library(tidyverse)
 library(openxlsx)
 library(nortest)
 library(e1071)
+library(cluster)
+library(factoextra)
+library(ggspatial)
+library(sf)
+library(leaflet)
+library(viridis)
+library(ggcorrplot)
+library(dummy)
+library(car)
+library(moments)
 #===============================================
 #Baza
 #===============================================
@@ -80,7 +102,7 @@ baza <- baza %>%
 #dostępność od 2024 roku
 
 baza <- baza %>%
-  select(-id, -city, -avaiable_from)
+  select(-id, -city, -avaiable_from, -created_at)
 
 #4. Dodanie nowych zmiennych
 #price_per_m, log_price, log_price_m
@@ -111,7 +133,19 @@ hist(baza$total_price,
 hist(baza$total_price[baza$total_price <= 3000000],
      breaks = 30,
      main = "Histogram cen mieszkań do 3mln zł",
-     xlab = "Cena")
+     xlab = "")
+mtext(
+  paste("Cena"),
+  side = 1, line = 2, cex = 1.2
+)
+mtext(
+  paste("Skosność:", round(skewness(baza$total_price), 4)),
+  side = 1, line = 3, cex = 0.8
+)
+mtext(
+  paste("Kurtoza:", round(kurtosis(baza$total_price), 4)),
+  side = 1, line = 4, cex = 0.8
+)
 #Wyraźna prawoskośność. Większość mieszkań w cenach 0.5mln - 1mln
 #brak rozkładu normalnego => problem z wykonaniem testów parametrycznych
 
@@ -169,13 +203,26 @@ hist(baza$area,
 
 hist(baza$area[baza$area <= 250],
      breaks = 30,
-     main = "Histogram powierzchni mieszkań",
-     xlab = "powierzchnia")
+     main = "Histogram powierzchni mieszkań do 250m^2",
+     xlab = "")
+
 #Nawet powyżej 150m^2 znikoma ilość ofert
 hist(baza$area[baza$area <= 150],
      breaks = 30,
-     main = "Histogram powierzchni mieszkań",
-     xlab = "powierzchnia")
+     main = "Histogram powierzchni mieszkań do 150m^2",
+     xlab = "")
+mtext(
+  paste("Cena"),
+  side = 1, line = 2, cex = 1.2
+)
+mtext(
+  paste("Skosność:", round(skewness(baza$area), 4)),
+  side = 1, line = 3, cex = 0.8
+)
+mtext(
+  paste("Kurtoza:", round(kurtosis(baza$area), 4)),
+  side = 1, line = 4, cex = 0.8
+)
 #Widać wyraźną dominacje mieszkań z powierzchnią 30-70m^2. Poza tym zakresem
 #ilosć ofert jest niższa, ale nie są to pojedyńczne przypadki. Trzeba będzie się
 #zastanowić nad wyborem zakresu danych w finalnej bazie.
@@ -317,7 +364,7 @@ baza %>%
 
 #2. Boxplot cen za m^2 mieszkań (do 25000 za m^2) ze względu na dzielnice
 baza %>%
-  filter(price_per_m <= 25000) %>%
+  filter(price_per_m >= 7000 & price_per_m <= 25000) %>%
   ggplot(aes(x = reorder(district, price_per_m , FUN = median), y = price_per_m)) +
   geom_boxplot(fill = "lightblue", color = "darkblue") +
   coord_flip() +
@@ -368,6 +415,110 @@ baza %>%
 #piękna chmurka. Możemy zaobserwować, że wraz ze wzrostem powierzchni cena,
 #staje się coraz bardziej zróżnicowana/nieprzewidalna (odstaje od lini trendu)
 
+baza %>%
+  filter(total_price <= 3000000, area <= 200) %>%
+  ggplot (aes(x=area, y=total_price)) +
+  geom_point(alpha = 0.4) +
+  geom_smooth(method = "loess", se = TRUE) +
+  scale_y_continuous(labels = scales::comma) +
+  labs(
+    title = "Zależność ceny (do 3mln) od powierzchni (do 200m^2)",
+    x = "Powierzchnia",
+    y = "Cena",
+    color = "Dzielnica"
+  ) +
+  theme_minimal()
+
+# Ad. 5 Wykres rozrzutu ceny za m^2 od roku budowy z wygładzaniem LOESS (Mikołaj Dyjakowski)
+baza_filtered %>%
+  filter(build_year >= 1865) %>%   # <--- Ograniczenie zakresu czasowego
+  ggplot(aes(x = build_year, y = price_per_m)) +
+  geom_point(alpha = 0.3, color = "darkblue") +  # Punkty z przezroczystością
+  geom_smooth(method = "loess", color = "red", se = TRUE) + # Linia trendu LOESS
+  scale_y_continuous(labels = scales::comma) +   # Formatowanie osi Y (bez notacji naukowej)
+  labs(
+    title = "Zależność ceny za m^2 od roku budowy",
+    subtitle = "Metoda wygładzania: LOESS",
+    x = "Rok budowy",
+    y = "Cena za m^2 (zł)"
+  ) +
+  theme_minimal()
+
+
+#===============================================
+#Ad.6 Mapa cen (Heatmapa punktowa) (Mikołaj Dyjakowski)
+#===============================================
+
+# Wykres geograficzny: Kolor punktu zależy od ceny za m^2
+baza_filtered %>%
+  ggplot(aes(x = longitude, y = latitude, color = price_per_m)) +
+  geom_point(alpha = 0.6, size = 1) +  
+  scale_color_viridis_c(option = "magma", direction = -1, labels = scales::comma) + 
+  coord_quickmap() +  
+  labs(
+    title = "Geograficzny rozkład cen mieszkań w Krakowie",
+    subtitle = "Im jaśniejszy kolor, tym wyższa cena za m^2",
+    x = "Długość geograficzna",
+    y = "Szerokość geograficzna",
+    color = "Cena/m^2"
+  ) +
+  theme_dark()
+
+
+#===============================================
+#Heatmapa - leaflet
+#===============================================
+mieszkania_sf <- st_as_sf(baza, coords = c("longitude", "latitude"), crs = 4326)
+
+ggplot(mieszkania_sf) +
+  annotation_map_tile(type = "osm", zoom = 12) + 
+  geom_sf(aes(color = price_per_m), size = 2, alpha = 0.7) +
+  theme_minimal() +
+  labs(title = "Mapa cen mieszkań w Krakowie",
+       subtitle = "Stan na 04.01.2026",
+       caption = "Źródło: otodom.pl")
+
+baza_heatmap_price_per_m <- baza %>%
+  filter(price_per_m >= 7000 & price_per_m <= 30000)
+
+leaflet(baza_heatmap_price_per_m) %>%
+  addTiles() %>%
+  addCircleMarkers(
+    lng = ~longitude, 
+    lat = ~latitude,
+    radius = 5,
+    color = ~colorNumeric("YlOrRd", price_per_m)(price_per_m),
+    fillOpacity = 0.8,
+    stroke = FALSE,
+    popup = ~paste0("Dzielnica: ", district, "<br>",
+                    "Cena/m2: ", round(price_per_m, 2), " zł<br>",
+                    "Powierzchnia: ", area, " m2")
+  ) %>%
+  addLegend(pal = colorNumeric("YlOrRd", baza_heatmap_price_per_m$price_per_m), 
+            values = ~price_per_m, 
+            title = "Cena za m^2", 
+            position = "bottomright")
+
+baza_heatmap_total_price <- baza %>%
+  filter(total_price >= 500000 & total_price <= 2000000)
+
+leaflet(baza_heatmap_total_price) %>%
+  addTiles() %>%
+  addCircleMarkers(
+    lng = ~longitude, 
+    lat = ~latitude,
+    radius = 5,
+    color = ~colorNumeric("YlOrRd", total_price)(total_price),
+    fillOpacity = 0.8,
+    stroke = FALSE,
+    popup = ~paste0("Dzielnica: ", district, "<br>",
+                    "Cena: ", round(total_price, 2), " zł<br>",
+                    "Powierzchnia: ", area, " m2")
+  ) %>%
+  addLegend(pal = colorNumeric("YlOrRd", baza_heatmap_total_price$total_price), 
+            values = ~total_price, 
+            title = "Cena", 
+            position = "bottomright")
 #===============================================
 #Filtrowanie bazy. Walka o normalność
 #===============================================
@@ -531,26 +682,589 @@ baza_filtered %>%
 #===============================================
 #Relacje pomiędzy parami zmiennych
 #===============================================
+#1. Korelacja ceny całkowitej i powierzchni
+cor.test(baza_filtered$total_price, baza_filtered$area, method = "spearman", exact = FALSE)
+#rho 0.7536825 p-value < 2.2e-16
+#Pierwszy przykład oczywisty, ale no... Wyraźna korelacja dodatnia =>
+# powierzchnia jest głównym czynnikiem całkowitą cene
 
+#2. Korelacja ceny za m^2 i roku budowy
+cor.test(baza_filtered$price_per_m, baza_filtered$build_year, method = "spearman", exact = FALSE)
+#rho 0.07401119 p-value = 0.3856
+#Niska korelacja, wysoka wartośc p => wynik nieistotny statystycznie.
+#Problem przez metode. Rok budowy wiele razy się powtórzył więc spearman który
+#opiera się na nadawaniu "rang" mógł zgłupieć... Jest obawa, że to źle dobrana
+#metoda do "zadania".
+
+#3.Zależność ceny za m^2 od stanu wykończenia
+kruskal.test(price_per_m ~ finishing_state, data = baza_filtered)
+#chi-squared = 226.18, p-value < 2.2e-16
+#p < 0.05 => Ceny za m^2 w zależności od stanu wykończenia się różnią
 
 #===============================================
 #Regresja liniowa
+#Za tą część odpowiadał: Jan Barchanowicz
 #===============================================
-#1. Przygotowanie bazy do regresji:
-baza_lr <- baza %>%
-  filter(
-    total_price >= 500000 & total_price <= 1380000,
-    area >= 25 & area <= 110,
-    price_per_m >= 7000 & price_per_m <= 28000,
-    build_year > 1550 & build_year <= 2026,
-    rooms != 0,
-    total_floors >= floor,
-    !is.na(finishing_state),
-    !is.na(advertiser_type),
-    !is.na(market_type),
-  )
+baza <- read.xlsx("C:/Users/jasiu/OneDrive - Akademia Górniczo-Hutnicza im. Stanisława Staszica w Krakowie/Studia/IFS1-3/Analiza danych/Koło naukowe/Apartments project/apartments (2).xlsx")
+
+baza <- baza %>%
+  mutate(across(
+    c(latitude, longitude, total_price, area, rooms, floor, total_floors, build_year), 
+    as.numeric
+  ))
+#zamiana typów character na numeric, niezbędna do dalszej analizy
+
+baza <- baza %>%
+  mutate (price_per_m = total_price / area)
+#dodanie zmiennej price_per_m w celu ułatwienia zobrazowania cen
+
+baza <- baza %>% 
+  filter(price_per_m < 25000)
+
+#odfiltrowanie obserwacji z ceną za m^2 powyzej 25000 zł
+#Nie było ich dużo, a znacząco zaburzały rozkład tej zmiennej
+#Oraz skośność, co mogłoby prowadić do późniejszych błędów w modelu
+#tu możnaby pokazac histogram tej wartosci
+baza<- baza %>% 
+  mutate(log_price = log(total_price)) %>% 
+  mutate(log_price_m = log(price_per_m))
+#Dodanie logarytmu ceny całkowitej oraz ceny za m^2, dzięki czemu 
+#rozkład będzie znacznie stabilniejszy i bliższy normalnemu
+#Ułatwia to dalszą analizę
 
 
+Q1 <- quantile(baza$area, 0.25)
+Q3 <- quantile(baza$area, 0.75)
+IQR <- Q3 - Q1
+#definicja zakresów potrzebnych do następnego etapu filtrowania
+#Zakresy te wzięły się z wykresu pudełkowego powierzchni
+
+boxplot(baza$area)
+
+#na którym widać, iż jest sporo obserwacji wykraczających poza 
+#wartości mediany
+
+baza<- baza %>%  
+  filter(log_price < 14.75 & log_price > 12.5 ) %>% 
+  #odfiltrowanie obserwacji z mocno odstającą ceną
+  # w celu redukcji skośności i poprawy kurtozy
+  filter(log_price >= 12.75) %>% 
+  #tutaj to samo
+  #możnaby przy tym gdzieś pokazac znowu ten histogram
+  filter(log_price_m >=9.2) %>%
+  filter(log_price < 14.35) %>% 
+  filter(total_price <= 1500000) %>% 
+  #Odfiltrowanie skrajnie wysokich cen
+  #mogących zaburzać dokładność modelu
+  filter(price_per_m < 21500 | price_per_m > 22000) %>% 
+  #znowu odfiltrowanie odstających cen na m^2
+  dplyr::select(-id, -source, -city, -avaiable_from, -created_at) %>% 
+  #usunięcie niepotrzebnych w dalszej analizie kolumn
+  filter(area < Q3 + 1.5 * IQR | area > Q1 - 1.5 * IQR)
+  #filtrowanie na podstawie odstawania obserwacji o więcej niż
+#1.5 IQR
+
+
+#histogram log price w celu pokazania osiągniętych wartosci 
+#kurtozy i skośności
+hist(baza$log_price,
+     breaks = 30,
+     main = "Histogram cen całkowitych",
+     xlab = "",
+     ylab = "Częstotliwość")
+
+
+
+mtext("Logarytm ceny za metr kwadratowy", side = 1, line = 2, cex = 0.9)
+#ładniejszy opis osi X
+mtext(
+  paste("Skosność:", round(skewness(baza$log_price), 4)),
+  side = 1, line = 3, cex = 0.8
+)
+# Skosność
+
+mtext(
+  paste("Kurtoza:", round(kurtosis(baza$log_price), 4)),
+  side = 1, line = 4, cex = 0.8
+)
+# Kurtoza
+
+
+Q1 <- quantile(baza$log_price_m, 0.25, na.rm = TRUE)
+Q3 <- quantile(baza$log_price_m, 0.75, na.rm = TRUE)
+IQR <- Q3 - Q1
+
+#Przygotowanie zakresów w celu usunięcia odstających 
+#obserwacji znalezionych na wykresie pudełkowym 
+#logarytmu ceny za m^2
+
+num_vars <- baza %>% dplyr::select(where(is.numeric))
+
+par(mfrow = c(1, 1))
+for (v in names(num_vars)) {
+  boxplot(num_vars[[v]], main = v)
+}
+#utworzenie wykresów pudełkowych dla każdej zmiennej numerycznej
+#w bazie
+
+lower_bound <- Q1 - 1.5 * IQR
+upper_bound <- Q3 + 1.5 * IQR
+baza <- baza %>% 
+  dplyr::filter(log_price_m > lower_bound, log_price_m < upper_bound)
+
+#usunięcie odstających obserwacji w logarytmie ceny za m^2
+
+Q1 <- quantile(baza$log_price, 0.25, na.rm = TRUE)
+Q3 <- quantile(baza$log_price, 0.75, na.rm = TRUE)
+IQR <- Q3 - Q1
+
+lower_bound <- Q1 - 1.5 * IQR
+upper_bound <- Q3 + 1.5 * IQR
+
+baza <- baza %>%
+  filter(log_price >= lower_bound, log_price <= upper_bound)
+
+
+#To samo dla logarytmu ceny całkowitej
+
+Q1 <- quantile(baza$build_year, 0.25, na.rm = TRUE)
+Q3 <- quantile(baza$build_year, 0.75, na.rm = TRUE)
+IQR <- Q3 - Q1
+
+lower_bound <- Q1 - 1.5 * IQR
+upper_bound <- Q3 + 1.5 * IQR
+
+sum(baza$build_year < lower_bound | 
+      baza$build_year > upper_bound, 
+    na.rm = TRUE)
+
+#Usunięcie obserwacji odstających dla roku zbudowania
+
+sum(baza$build_year == 0, na.rm = TRUE)
+#sprawdzenie ile jest zerowych wartości roku budowy
+
+baza <- baza %>%
+  mutate(build_year = ifelse(build_year == 0, NA, build_year))
+#zamiana tych wartosci na NA
+
+baza <- baza %>%
+  filter(!is.na(build_year))
+#usunięcie wartości NA z build year
+
+baza$build_year[which(baza$build_year == 980)] <- 1980
+#Poprawa prawdopobobnego błędu znalezionego w jednej obserwacji
+baza$build_year[which(baza$build_year == 1)] <- NA
+#zamiana wartości 1 w roku wybudowania na NA
+baza$build_year[which(baza$build_year == 0)] <- NA
+#To samo dla wartości 0
+
+baza <- baza %>%
+  filter(!is.na(build_year))
+#odfiltrowanie wartosci NA z build year (krok powtórzony dla pewności)
+baza <- baza %>%
+  filter(build_year != 1) %>% 
+  filter(build_year != 0) %>% 
+  filter(build_year != 2)
+#Odfiltrowanie wartości year build równych 0, 1 lub 2 
+
+colSums(is.na(baza)) > 0
+#sprawdzenie które kolumny jeszcze wciąż mają NA
+sum(is.na(baza$finishing_state))
+#sprawdzenie ile NA ma konkretna kolumna
+
+baza <- baza %>%
+  filter(!is.na(finishing_state))
+#odfiltrowanie obserwacji z wartościami NA w finishing state
+sum(is.na(baza$heating_type))
+#sprawdzenie ilosci NA w heating type
+
+mode_val <- names(sort(table(baza$heating_type), decreasing = TRUE))[1]
+
+baza <- baza %>%
+  mutate(heating_type = ifelse(is.na(heating_type), mode_val, heating_type))
+#z powodu ogromnej ilości NA, brakujące wartości wypełniliśmy
+#modą
+
+baza <- baza %>%
+  mutate(has_elevator = as.numeric(has_elevator))
+#przekształcenie zmiennej logicznej has_elevator na binarną
+
+baza$heating_type <- as.factor(baza$heating_type)
+baza$finishing_state <- as.factor(baza$finishing_state)
+baza$district <- as.factor(baza$district)
+baza$market_type <- as.factor(baza$market_type)
+baza$advertiser_type <- as.factor(baza$advertiser_type)
+#przekształcenie zmiennych kategorialnych na factory
+
+model1 <- lm(formula = log_price ~ . + area * district - price_per_m - log_price_m, data = baza)
+summary(model1)
+par(mfrow = c(2, 2))  # Dzieli ekran na 2 wiersze i 2 kolumny
+plot(model1)
+par(mfrow = c(1,1))
+#pierwszy model z relacją
+#area_log - district
+#decyzja o kodowaniu hot one aby 
+#ułatwić interpretację modelu
+#Mimo niewiarygodnie wysokiego R^2
+#Jakość modelu nie jest najlepsza, prawdopodobnie z powodu zbyt dużej
+#ilości zmiennych wyjaśniających, oraz z powodu obecności zmiennych
+#kategorialnych
+install.packages("fastDummies")
+library(fastDummies)
+lapply(baza[c("heating_type", "finishing_state", "district", "market_type", "advertiser_type")],
+       function(x) sort(unique(x))[1])
+
+#sprawdzenie które kolumny zostaną użyte jako referencje 
+#Heating_type - boiler_room
+#Finishing_state - ready_to_use
+#district - Bieńczyce
+#market_type - primary
+#advertiser_type - agency
+
+# wyniku działania pakietu fastDummies
+baza <- dummy_cols(
+  baza,
+  select_columns = c("heating_type", "finishing_state", "district", "market_type", "advertiser_type"),
+  remove_first_dummy = TRUE,   # usuwa kategorię referencyjną
+  remove_selected_columns = TRUE
+)
+#kodowanie jeden do wielu zmiennych kategorialnych
+
+baza <- baza %>% 
+  dplyr::select(-c(latitude, longitude, total_price, price_per_m, log_price_m))
+#usunięcie kolumn zbędnych w dalszej analizie
+#Z racji iż model price_per_m okazał się być niezwykle ciężki
+#do dalszego użycia (trudno było poprawiać jego jakość)
+#zdecydowaliśmy się na model wyjaśniający total_price 
+# w formie logarytmowanej
+names(baza) <- gsub(" ", "_", names(baza))
+#pozybcie się spacji w nazwach zmiennych
+#wykresy diagnostyczne modelu
+reszty <- resid(model1)
+baza <- baza[abs(reszty) <= 0.4, ]
+#usuniecie reszt wiekszych niz 0.4
+leverage_values <- hatvalues(model1)
+id_punktu <- which.max(leverage_values)
+
+leverage_values[id_punktu]
+
+baza[id_punktu, ]
+#ustalenie punktu o najwyższym leverage value
+#Jest to prawdopodobnie blad - jak mieszkanie z 2008 roku moze mieć 
+#piec kaflowy?
+#Usuwamy
+
+baza <- baza[-id_punktu, ]
+
+baza$area <- log(baza$area)
+#decyzja o logarytmizacji powierzchni
+#w celu poprawy rozkladu, a tym samym jakości modelu
+baza <- rename(baza, area_log = area)
+#zmiana nazwy kolumny w celu poprawy czytelności
+
+
+#podejrzenie silnej korelacji market_type_secondary z year_build
+cor_matrix <- cor(baza[ , c("market_type_secondary", "build_year")])
+corrplot::corrplot(
+  cor_matrix,
+  method = "color",
+  addCoef.col = "black",
+  tl.col = "black",
+  type = "upper",
+  diag = FALSE,
+  main = "Korelacja: market_type_secondary vs build_year"
+)
+#potwierdzenie tej korelacji
+
+baza$build_year <- cut(baza$build_year, 
+                                   breaks = c(-Inf, 1945, 1989, 2010, Inf), 
+                                   labels = c("Kamienica", "PRL", "Transformacja", "Nowe"))
+#zamiana build year na przedzialy w celu 
+#zanegowania efektu tej korelacji
+#ponadto relacja log_price z build_year
+# nie jest liniowa
+#dzieki temu model lepiej moze zrozumieć że
+#stare kamienice i nowe apartamenty mogą być jednocześnie drogie 
+#mimo rożnicy wieku
+
+model2 <- lm(formula = log_price ~ ., data = baza)
+summary(model2)
+par(mfrow = c(2, 2))  # Dzieli ekran na 2 wiersze i 2 kolumny
+plot(model2)
+par(mfrow = c(1,1))
+
+v_model_m <- vif(model2)
+subset(v_model_m, v_model_m > 5)
+#wyświetlenie czynników o VIF >5)
+#Zmienne dzielnicowe niestety muszą zostać, mimo tak
+#silnego wpływu na model
+#natomiast usunięciu podległa zmienna heating_type_urban, 
+#gdyż niewiele wnosi ona do wytłumaczenia ceny
+ggplot(baza, aes(x = factor(heating_type_urban), y = log_price)) +
+  stat_summary(fun = mean, geom = "point", size = 3, color = "red") +
+  stat_summary(fun.data = mean_cl_normal, geom = "errorbar", width = 0.2) +
+  labs(
+    x = "Heating type: urban",
+    y = "Log price",
+    title = "Średnie log_price z przedziałami ufności"
+  ) +
+  theme_minimal()
+
+#jak widać tutaj na wykresie
+
+
+#ponowne sprawdzenie modelu
+v_model_m <- vif(model2)
+subset(v_model_m, v_model_m > 5)
+
+
+#kolejny etap - usunięcie zmiennych nie wnoszących nic do modelu
+#tutaj będą to zmienne advertiser_type oraz market_type_secondary
+#i heating type gas, other i tiled stove, oraz total floors
+
+model3 <- lm(formula = log_price ~ .-advertiser_type_developer -advertiser_type_private -market_type_secondary-heating_type_gas-heating_type_other-heating_type_tiled_stove, data = baza)
+summary(model3)
+par(mfrow = c(2, 2))  # Dzieli ekran na 2 wiersze i 2 kolumny
+plot(model3)
+par(mfrow = c(1,1))
+#kolejna poprawa jakosci oraz dopasowania modelu, 
+#qq residuals są lepsze, zarowno jak i residuals vs leverage
+reszty <- resid(model3)
+print(which.max(reszty))
+baza <- baza[rownames(baza) != "171", ]
+baza <- baza[rownames(baza) != "169", ]
+#usuwanie maksymalnej reszty
+
+reszty_std <- rstandard(model3)
+indeksy_qq <- order(abs(reszty_std), decreasing = TRUE)[1:10]
+top10_qq <- baza[indeksy_qq, ]
+print(top10_qq)
+#wybor oraz podejrzenie obserwacji o największych błędach
+# w celu decyzji co nalezy zrobić
+#Wiersze 171 oraz 3321 to duplikaty
+# nalezy je usunąć
+#Wiersz 4423 - anomalia w postaci jednopokojowego 50m mieszkania
+#usunięcie duplikatu
+baza <- baza[which(rownames(baza) != "171"), ]
+#
+
+
+cooks <- cooks.distance(model3)
+indeksy_leverage <- order(cooks, decreasing = TRUE)[1:10]
+top10_leverage <- baza[indeksy_leverage, ]
+print(top10_leverage)
+#wyswietlenie 10 obserwacji o największym wpływie na model
+#wiersz 4497 - dziwna kombinacja stanu i epoki
+#do wykończenia z lat 1990-2015?
+#nietypowy przypadek -> do usuniecia
+#4884 -> prawdopodobinie dom. Heating type other oraz wysoka powierzchnia
+#moze oznaczać pompę 
+#ciepła - jest to opcja premium, stąd cena
+#Do usunięcia
+for_deletion <- c("4884", "4497")
+baza <- baza[rownames(baza) != "4884", ]
+baza <- baza[rownames(baza) != "4497", ]
+#usunięcie wspomnianych przypadków
+model3 <- lm(formula = log_price ~ .-advertiser_type_developer -advertiser_type_private -market_type_secondary-heating_type_gas-heating_type_other-heating_type_tiled_stove, data = baza)
+summary(model3)
+par(mfrow = c(2, 2))  # Dzieli ekran na 2 wiersze i 2 kolumny
+plot(model3)
+par(mfrow = c(1,1))
+#końcowy model
+
+reszty <- resid(model3)
+
+hist(reszty)
+#pokazanie rozkładu reszt modelu
+
+coefs <- coef(model3)[-1]
+#Pobranie zmiennych bez interceptu
+
+tabela_final <- data.frame(
+  Zmienna = names(coefs),
+  Beta = coefs
+) %>%
+  #utworzenie tabeli zawierającej zmienne oraz ich wpływ w procentach
+  mutate(
+    Wplyw_Procentowy = ifelse(
+      Zmienna == "area_log",
+      round(Beta * 1, 2), 
+      round((exp(Beta) - 1) * 100, 2) 
+    )
+    #logika obliczania wpływu procentowego
+    #Nie obliczamy logarytmu dla area_log
+  ) %>%
+  select(Zmienna, Wplyw_Procentowy) %>%
+  arrange(desc(abs(Wplyw_Procentowy))) # Sortowanie od najsilniejszych czynników
+#wybieramy kolumny oraz sortujemy
+
+
+referencje <- data.frame(
+  Zmienna = c(
+    "heating_type_boiler_room",
+    "finishing_state_ready_to_use",
+    "district_Bieńczyce", "build_year"
+  ),
+  Wplyw_Procentowy = 0
+)
+#utworzenie tabeli ze zmiennymi referencyjnymi
+
+tabela_final <- bind_rows(tabela_final, referencje) %>%
+  mutate(
+    Zmienna = gsub("district_", "Dzielnica: ", Zmienna),
+    Zmienna = gsub("heating_type_", "Ogrzewanie: ", Zmienna),
+    Zmienna = gsub("finishing_state_", "Standard: ", Zmienna),
+    Zmienna = gsub("market_type_", "Rynek: ", Zmienna),
+    Zmienna = gsub("advertiser_type_", "Ogłoszeniodawca: ", Zmienna),
+    Zmienna = gsub("build_year", "Epoka: ", Zmienna)
+  ) %>%
+  #utworzenie tabeli finalnej 
+  arrange(Zmienna, desc(abs(Wplyw_Procentowy)))
+
+tabela_final$Zmienna[tabela_final$Zmienna == "Epoka: "] <- "Epoka: Kamienica"
+#Zmiana nazwy "Epoka" na "Epoka: Kamienica" dla czytelności
+#grupowanie po zmiennej
+print(tabela_final, row.names = FALSE)
+#wyświetlanie tabeli
+
+#===================================
+#To samo dla pozostałych dwóch modeli
+#===================================
+coefs <- coef(model2)[-1]
+#Pobranie zmiennych bez interceptu
+
+tabela_final <- data.frame(
+  Zmienna = names(coefs),
+  Beta = coefs
+) %>%
+  #utworzenie tabeli zawierającej zmienne oraz ich wpływ w procentach
+  mutate(
+    Wplyw_Procentowy = ifelse(
+      Zmienna == "area_log",
+      round(Beta * 1, 2), 
+      round((exp(Beta) - 1) * 100, 2) 
+    )
+    #logika obliczania wpływu procentowego
+    #Nie obliczamy logarytmu dla area_log
+  ) %>%
+  select(Zmienna, Wplyw_Procentowy) %>%
+  arrange(desc(abs(Wplyw_Procentowy))) # Sortowanie od najsilniejszych czynników
+#wybieramy kolumny oraz sortujemy
+
+
+referencje <- data.frame(
+  Zmienna = c(
+    "heating_type_boiler_room",
+    "finishing_state_ready_to_use",
+    "district_Bieńczyce", "build_year", "Rynek, Ogłoszeniodawca:"
+  ),
+  Wplyw_Procentowy = 0
+)
+#utworzenie tabeli ze zmiennymi referencyjnymi
+
+tabela_final <- bind_rows(tabela_final, referencje) %>%
+  mutate(
+    Zmienna = gsub("district_", "Dzielnica: ", Zmienna),
+    Zmienna = gsub("heating_type_", "Ogrzewanie: ", Zmienna),
+    Zmienna = gsub("finishing_state_", "Standard: ", Zmienna),
+    Zmienna = gsub("market_type_", "Rynek: ", Zmienna),
+    Zmienna = gsub("advertiser_type_", "Ogłoszeniodawca: ", Zmienna),
+    Zmienna = gsub("build_year", "Epoka: ", Zmienna)
+  ) %>%
+  #utworzenie tabeli finalnej 
+  arrange(Zmienna)
+
+tabela_final$Zmienna[tabela_final$Zmienna == "Epoka: "] <- "Epoka: Kamienica"
+#Zmiana nazwy "Epoka" na "Epoka: Kamienica" dla czytelności
+#grupowanie po zmiennej
+print(tabela_final, row.names = FALSE)
+
+#======================================
+
+#======================================
+
+coefs <- coef(model3)[-1]
+#Pobranie zmiennych bez interceptu
+
+tabela_final <- data.frame(
+  Zmienna = names(coefs),
+  Beta = coefs
+) %>%
+  #utworzenie tabeli zawierającej zmienne oraz ich wpływ w procentach
+  mutate(
+    Wplyw_Procentowy = ifelse(
+      Zmienna == "area_log",
+      round(Beta * 1, 2), 
+      round((exp(Beta) - 1) * 100, 2) 
+    )
+    #logika obliczania wpływu procentowego
+    #Nie obliczamy logarytmu dla area_log
+  ) %>%
+  select(Zmienna, Wplyw_Procentowy) %>%
+  arrange(desc(abs(Wplyw_Procentowy))) # Sortowanie od najsilniejszych czynników
+#wybieramy kolumny oraz sortujemy
+
+
+referencje <- data.frame(
+  Zmienna = c(
+    "heating_type_boiler_room",
+    "finishing_state_ready_to_use",
+    "district_Bieńczyce", "build_year"
+  ),
+  Wplyw_Procentowy = 0
+)
+#utworzenie tabeli ze zmiennymi referencyjnymi
+
+tabela_final <- bind_rows(tabela_final, referencje) %>%
+  mutate(
+    Zmienna = gsub("district_", "Dzielnica: ", Zmienna),
+    Zmienna = gsub("heating_type_", "Ogrzewanie: ", Zmienna),
+    Zmienna = gsub("finishing_state_", "Standard: ", Zmienna),
+    Zmienna = gsub("market_type_", "Rynek: ", Zmienna),
+    Zmienna = gsub("advertiser_type_", "Ogłoszeniodawca: ", Zmienna),
+    Zmienna = gsub("build_year", "Epoka: ", Zmienna)
+  ) %>%
+  #utworzenie tabeli finalnej 
+  arrange(Zmienna, desc(abs(Wplyw_Procentowy)))
+
+tabela_final$Zmienna[tabela_final$Zmienna == "Epoka: "] <- "Epoka: Kamienica"
+#Zmiana nazwy "Epoka" na "Epoka: Kamienica" dla czytelności
+#grupowanie po zmiennej
+print(tabela_final, row.names = FALSE)
+
 #===============================================
-#Analiza skupień
+#Analiza skupień - metoda PAM - Mikołaj Grabowski
 #===============================================
+#1. Dane do tworzenia klastrów:
+wybrane <- select(baza_filtered,c("log_price", "area", "build_year"))
+
+#2 Standaryzacja
+wybrane_stand <- scale(wybrane)
+
+#3. Ile klastrów wybrać?
+fviz_nbclust(wybrane_stand, pam, method = "wss")
+gap <- clusGap(wybrane_stand, pam, K.max = 8, B=500)
+fviz_gap_stat(gap)
+
+#4. Wersja dla 4 klastrów
+wynik_4_klastry <- pam(wybrane_stand,6)
+fviz_cluster(wynik_4_klastry,data = wybrane_stand)
+
+#5. Wersja dla 6 klastrów
+wynik_6_klastry <- pam(wybrane_stand,6)
+fviz_cluster(wynik_4_klastry,data = wybrane_stand)
+
+#6. Wersja dla 7 klastrów
+wynik_7_klastry <- pam(wybrane_stand,6)
+fviz_cluster(wynik_4_klastry,data = wybrane_stand)
+
+#7. Jak interpretować wymiary
+res.pca <- prcomp(wybrane_stand)
+fviz_pca_var(res.pca, col.var = "black")
+
+#Dim1 (oś pozioma) - log_price + area
+#Lewo - mieszkania większe i droższe
+#Prawo - mieszkania mniejsze i tańsze
+#Dim2 (oś pionowa) - build_year
+#Góra - wyższy rok budowy
+#Dół - niższy rok budowy
