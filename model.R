@@ -267,7 +267,7 @@ subset(v_model_m, v_model_m > 5)
 #silnego wpływu na model
 #natomiast usunięciu podległa zmienna heating_type_urban, 
 #gdyż niewiele wnosi ona do wytłumaczenia ceny
-ggplot(baza_model, aes(x = factor(heating_type_urban), y = log_price)) +
+ggplot(baza, aes(x = factor(heating_type_urban), y = log_price)) +
        stat_summary(fun = mean, geom = "point", size = 3, color = "red") +
        stat_summary(fun.data = mean_cl_normal, geom = "errorbar", width = 0.2) +
        labs(
@@ -429,3 +429,4 @@ tabela_final$Zmienna[tabela_final$Zmienna == "Epoka: "] <- "Epoka: Kamienica"
 #grupowanie po zmiennej
 print(tabela_final, row.names = FALSE)
 #wyświetlanie tabeli
+
